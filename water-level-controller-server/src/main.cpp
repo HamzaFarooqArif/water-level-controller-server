@@ -6,6 +6,8 @@
 // const char* ssid = "TP-Link_0B42";
 // const char* password =  "23368156";
 
+// // const char* ssid = "KhaNet,";
+// // const char* password =  "hamza4321";
 // // Create AsyncWebServer object on port 80
 // AsyncWebServer server(80);
 
@@ -241,16 +243,24 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <Arduino_JSON.h>
+#include <NewPing.h>
 
 // Network credentials
 const char* ssid = "TP-Link_0B42";
 const char* password =  "23368156";
 
+unsigned int wifiTimeoutCounter = 0;
+unsigned int wifiTimeoutInterval = 20;
+
+// // Network credentials
+// const char* ssid = "EVO-Charji-C5CB";
+// const char* password =  "6ZJH33G6";
+
 // JSN-SR04T ultrasonic sensor configuration
-#define trigPin 12
-#define echoPin 13
-long duration;
-int distance;
+#define TRIGGER_PIN  12 
+#define ECHO_PIN     13
+#define MAX_DISTANCE 200 // Maximum distance we want to ping for (in centimeters). Maximum sensor distance is rated at 400-500cm.
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and maximum distance.
 
 // DS18B20 temperature sensor configuration
 const int oneWireBus = 33;
@@ -270,8 +280,8 @@ void flow () // Interrupt function
 }
 
 // Soil moisture sensor configuration
-int pipeMoistureSensorPin = 34;
-int fullTankMoistureSensorPin = 35;
+int pipeMoistureSensorPin = 35;
+int fullTankMoistureSensorPin = 34;
 
 AsyncWebServer server(80);
 JSONVar responseToSend;
@@ -280,17 +290,7 @@ bool shouldReboot = false;
 
 
 int measureWaterLevelCm(){
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(5);
- // Trigger the sensor by setting the trigPin high for 10 microseconds:
-  digitalWrite(trigPin, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  // Read the echoPin. pulseIn() returns the duration (length of the pulse) in microseconds:
-  duration = pulseIn(echoPin, HIGH);
-  // Calculate the distance:
-  distance = duration*0.034/2;
-  return distance;
+  return sonar.ping_cm();
 }
 
 float measureWaterTemperature(bool inCelsius){
@@ -327,7 +327,6 @@ int measureWaterPresence(int sensorPin){
 
 String getData() {
   return JSON.stringify(responseToSend);
-  //return String(1.8 * bme.readTemperature() + 32);
 }
 
 void checkToReboot(){
@@ -353,48 +352,137 @@ void inquireSensorData(){
 
 
 void setup(){
-  // JSN-SR04T ultrasonic sensor setup
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-
+  Serial.begin(115200);
+  pinMode(2, OUTPUT);
+  pinMode(4, OUTPUT);
+  pinMode(5, OUTPUT);
+  
   // DS18B20 Temperature sensor setup
   TemperatureSensor.begin();
 
+  // YF-S201C flow rate sensor setup
   pinMode(flowsensor, INPUT);
   digitalWrite(flowsensor, HIGH); // Optional Internal Pull-Up
   attachInterrupt(digitalPinToInterrupt(flowsensor), flow, RISING); // Setup Interrupt
   currentTime = millis();
   cloopTime = currentTime;
 
-  Serial.begin(115200);
+  // Server setup
   Serial.print("Connecting to ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
+  
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
     Serial.print(".");
+    digitalWrite(4, HIGH);
+    delay(500);
+    digitalWrite(4, LOW);
+    delay(500);
+    if(wifiTimeoutCounter > wifiTimeoutInterval){
+      esp_restart();
+    }
+    wifiTimeoutCounter += 1;
   }
   Serial.println("");
   Serial.println("WiFi connected.");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-  server.begin();
   inquireSensorData();
   server.on("/getData", HTTP_GET, [](AsyncWebServerRequest *request){
+    digitalWrite(5, HIGH);
     request->send_P(200, "text/plain", getData().c_str());
+    digitalWrite(5, LOW);
   });
   server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/plain", reboot().c_str());
   });
-
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  server.begin();
 }
 
 void loop(){
+  digitalWrite(2, HIGH);
+  
   checkToReboot();
   inquireSensorData();
 
   Serial.println(responseToSend);
 
+  digitalWrite(2, LOW);
   delay(1000);
-
 }
+
+// ---------------------------------------------------------------------------
+
+// #include <Arduino.h>
+// #include <WiFi.h>
+// #include <AsyncTCP.h>
+// #include <ESPAsyncWebServer.h>
+// #include "webpage_file.h"
+
+// AsyncWebServer server(80);
+
+// // REPLACE WITH YOUR NETWORK CREDENTIALS
+// const char* ssid = "TP-Link_0B42";
+// const char* password =  "23368156";
+
+// // HTML web page to handle 3 input fields (input1, input2, input3)
+// const char* index_html PROGMEM = {index_file};
+
+// void notFound(AsyncWebServerRequest *request) {
+//   request->send(404, "text/plain", "Not found");
+// }
+
+// void setup() {
+//   Serial.begin(115200);
+  
+//   Serial.print("Connecting to ");
+//   Serial.println(ssid);
+//   WiFi.begin(ssid, password);
+//   while (WiFi.status() != WL_CONNECTED) {
+//     delay(500);
+//     Serial.print(".");
+//   }
+//   Serial.println("");
+//   Serial.println("WiFi connected.");
+//   Serial.println("IP address: ");
+//   Serial.println(WiFi.localIP());
+  
+//   // Send web page to client
+//   server.on("/waterLevel", HTTP_GET, [](AsyncWebServerRequest *request){
+//     request->send_P(200, "text/html", index_html);
+//   });
+
+//   server.onNotFound(notFound);
+//   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+//   server.begin();
+// }
+
+// void loop() {
+  
+// }
+
+// ---------------------------------------------------------------------------
+// Example NewPing library sketch that does a ping about 20 times per second.
+// ---------------------------------------------------------------------------
+
+// #include "Arduino.h"
+// #include <NewPing.h>
+
+// #define TRIGGER_PIN  12  // Arduino pin tied to trigger pin on the ultrasonic sensor.
+// #define ECHO_PIN     13
+//   // Arduino pin tied to echo pin on the ultrasonic sensor.
+// #define MAX_DISTANCE 200 // Maximum distance we want to ping for (in centimeters). Maximum sensor distance is rated at 400-500cm.
+
+// NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE); // NewPing setup of pins and maximum distance.
+
+// void setup() {
+//   Serial.begin(115200); // Open serial monitor at 115200 baud to see ping results.
+// }
+
+// void loop() {
+//   delay(50);                     // Wait 50ms between pings (about 20 pings/sec). 29ms should be the shortest delay between pings.
+//   Serial.print("Ping: ");
+//   Serial.print(sonar.ping_cm()); // Send ping, get distance in cm and print result (0 = outside set distance range)
+//   Serial.println("cm");
+// }
